@@ -41,7 +41,13 @@ pub fn convert_windows_path(source: &str, prefix: &str) -> Result<Option<String>
     // Win32 file namespace / device namespace prefixes: \\?\C:\ and \\.\C:\
     for ns in [r"\\?\", r"\\.\", "//?/", "//./"] {
         if let Some(stripped) = rest.strip_prefix(ns) {
-            if stripped.len() >= 4 && stripped[..4].eq_ignore_ascii_case(r"UNC\") {
+            // Compare bytes: slicing the str at byte 4 would panic when it
+            // falls inside a multi-byte character (e.g. `\\?\C:\é`).
+            if stripped
+                .as_bytes()
+                .get(..4)
+                .is_some_and(|p| p.eq_ignore_ascii_case(br"UNC\"))
+            {
                 return Err(err("UNC network paths are not supported"));
             }
             rest = stripped;
@@ -148,6 +154,10 @@ mod tests {
             Some("/mnt/c/long/path")
         );
         assert_eq!(ok(r"\\.\C:\dev", PODMAN).as_deref(), Some("/mnt/c/dev"));
+        // Non-ASCII right after the prefix: byte 4 is inside a character, so
+        // the UNC check must not slice the string there.
+        assert_eq!(ok(r"\\?\C:\é", PODMAN).as_deref(), Some("/mnt/c/é"));
+        assert_eq!(ok(r"\\?\abcé", PODMAN), None);
     }
 
     #[test]
@@ -168,6 +178,7 @@ mod tests {
     fn rejects_unmappable_windows_paths() {
         assert!(convert_windows_path(r"\\server\share\dir", PODMAN).is_err());
         assert!(convert_windows_path(r"\\?\UNC\server\share", PODMAN).is_err());
+        assert!(convert_windows_path(r"\\?\unc\server\share", PODMAN).is_err());
         assert!(convert_windows_path(r"C:\a\..\b", PODMAN).is_err());
         assert!(convert_windows_path("C:relative", PODMAN).is_err());
         // A bare drive letter is drive-relative, not the drive root.

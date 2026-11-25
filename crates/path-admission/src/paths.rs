@@ -59,10 +59,11 @@ pub fn convert_windows_path(source: &str, prefix: &str) -> Result<Option<String>
         // A plain POSIX path (or a volume name): not ours to touch.
         return Ok(None);
     }
-    // `C:` must be followed by a separator or end the string; `C:foo` is a
-    // drive-relative path whose meaning depends on the client's cwd.
+    // `C:` must be followed by a separator. Both a bare `C:` and `C:foo` are
+    // drive-relative: Windows resolves them against the drive's current
+    // directory, not its root.
     let tail = &rest[2..];
-    if !(tail.is_empty() || tail.starts_with('\\') || tail.starts_with('/')) {
+    if !(tail.starts_with('\\') || tail.starts_with('/')) {
         return Err(err(
             "drive-relative paths are not supported; use an absolute path like C:\\dir",
         ));
@@ -126,7 +127,10 @@ mod tests {
     #[test]
     fn converts_drive_roots() {
         assert_eq!(ok(r"C:\", PODMAN).as_deref(), Some("/mnt/c"));
-        assert_eq!(ok("C:", DOCKER).as_deref(), Some("/run/desktop/mnt/host/c"));
+        assert_eq!(
+            ok("C:/", DOCKER).as_deref(),
+            Some("/run/desktop/mnt/host/c")
+        );
     }
 
     #[test]
@@ -166,5 +170,8 @@ mod tests {
         assert!(convert_windows_path(r"\\?\UNC\server\share", PODMAN).is_err());
         assert!(convert_windows_path(r"C:\a\..\b", PODMAN).is_err());
         assert!(convert_windows_path("C:relative", PODMAN).is_err());
+        // A bare drive letter is drive-relative, not the drive root.
+        assert!(convert_windows_path("C:", PODMAN).is_err());
+        assert!(convert_windows_path(r"\\?\C:", PODMAN).is_err());
     }
 }

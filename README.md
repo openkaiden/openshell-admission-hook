@@ -24,7 +24,7 @@ openshell sandbox create --driver-config-json \
     `spec.template.driverConfig.podman.mounts[]`.
   * For every `type: "bind"` entry whose `source` is a Windows path, it returns
     an RFC 6902 `replace` patch.
-  * Windows paths it can't map (UNC shares, `..`, drive-relative `C:foo`) are
+  * Windows paths it can't map (UNC shares, `..`, drive-relative `C:` / `C:foo`) are
     denied with `INVALID_ARGUMENT`.
 
   | Driver | `C:\Users\me\proj` becomes | Override |

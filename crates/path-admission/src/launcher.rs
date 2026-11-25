@@ -94,7 +94,16 @@ pub fn inject_interceptor(source: &str, endpoint: &str, timeout: &str) -> Result
         .context("`openshell.gateway` in gateway config is not a table")?;
     let interceptors = gateway
         .entry("interceptors")
-        .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()))
+        .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
+    // An inline `interceptors = []` is parsed as a plain array, not an array
+    // of tables; treat it as an empty array of tables.
+    if interceptors
+        .as_array()
+        .is_some_and(|array| array.is_empty())
+    {
+        *interceptors = Item::ArrayOfTables(ArrayOfTables::new());
+    }
+    let interceptors = interceptors
         .as_array_of_tables_mut()
         .context("`openshell.gateway.interceptors` must be an array of tables")?;
 
@@ -433,5 +442,26 @@ enable_bind_mounts = true
     #[test]
     fn rejects_invalid_toml() {
         assert!(inject_interceptor("[openshell", "http://x:1", "2s").is_err());
+    }
+
+    #[test]
+    fn accepts_empty_inline_interceptors() {
+        let src = "[openshell]\nversion = 2\n\n[openshell.gateway]\ninterceptors = []\n";
+        let out = inject_interceptor(src, "http://127.0.0.1:12777", "2s").unwrap();
+        let doc: toml_edit::DocumentMut = out.parse().unwrap();
+        let list = doc["openshell"]["gateway"]["interceptors"]
+            .as_array_of_tables()
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list.get(0).unwrap()["name"].as_str(),
+            Some(INTERCEPTOR_NAME)
+        );
+    }
+
+    #[test]
+    fn rejects_non_empty_inline_interceptors() {
+        let src = "[openshell]\nversion = 2\n\n[openshell.gateway]\ninterceptors = [1, 2]\n";
+        assert!(inject_interceptor(src, "http://127.0.0.1:12777", "2s").is_err());
     }
 }

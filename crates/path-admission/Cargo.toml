@@ -19,7 +19,7 @@ prost-types = "0.14"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-toml_edit = "0.23"
+toml_edit = "0.25"
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "router"] }
 tonic-prost = "0.14"
 tracing = "0.1"

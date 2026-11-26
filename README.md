@@ -1,7 +1,6 @@
-# openshell-image-gateway
+# openshell-adminssion-hook
 
-OCI image based on the [OpenShell](https://github.com/NVIDIA/OpenShell) gateway
-(`ghcr.io/nvidia/openshell/gateway`) that adds a Rust **admission hook**. The
+A Rust **admission hook**. The
 hook rewrites Windows bind-mount paths in sandbox creation requests to the path
 the container machine sees (Docker Desktop / Podman machine).
 
@@ -35,8 +34,8 @@ openshell sandbox create --driver-config-json \
   Both `\` and `/` separators are accepted, as are `\\?\C:\...` paths. POSIX
   paths and volume names are left untouched.
 
-* **Startup order.** The upstream image is distroless (no shell), so the hook
-  binary is the entrypoint (PID 1):
+* **Startup order.** The hook
+  binary is the entrypoint:
   1. It binds and serves the hook on `127.0.0.1:12777`.
   2. It registers the hook in the gateway config. It takes the file given by
      `--config`, `OPENSHELL_GATEWAY_CONFIG`, or the gateway's XDG default,
@@ -74,28 +73,8 @@ openshell sandbox create --driver-config-json \
 ## Build
 
 ```sh
-podman build -t openshell-gateway-admission .
-# or: docker build -f Containerfile -t openshell-gateway-admission .
-
-# choose the upstream gateway version from the OPENSHELL_VERSION env var
-# (image tag, no "v" prefix); without it the base is gateway:latest
-export OPENSHELL_VERSION=0.1.9
-podman build --build-arg OPENSHELL_VERSION -t openshell-gateway-admission:0.1.9 .
-
-# or pass it directly (GATEWAY_TAG overrides OPENSHELL_VERSION)
-podman build --build-arg OPENSHELL_VERSION=0.1.9 .
-
-# multi-arch (each platform builds natively; non-native ones need qemu binfmt)
-podman build --platform linux/amd64,linux/arm64 --manifest openshell-gateway-admission .
+cargo build 
 ```
-
-The build stage uses Red Hat's hardened Rust builder
-(`registry.access.redhat.com/hi/rust:1.100.0-builder`, override with
-`--build-arg RUST_IMAGE=...`). It has a distro-packaged toolchain with no
-rustup or cross-compilers, so there is no cross-compilation. The binary is
-linked against the builder's glibc (2.43), but only uses symbols up to
-`GLIBC_2.39`, so it runs on the gateway's Debian 13 base (glibc 2.41).
-`tests/test.sh` runs it in the final image to catch any regression.
 
 ### OpenShell protos
 
@@ -113,8 +92,6 @@ gateway image tag. At build time, `crates/path-admission/build.rs`:
    is needed), then generates the code with `tonic-prost-build`.
 
 To move to another OpenShell release, edit `openshell.version` and rebuild.
-Keep it in line with the gateway image; the same value works for both:
-`OPENSHELL_VERSION=$(cat openshell.version) podman build --build-arg OPENSHELL_VERSION .`.
 The gateway interceptor protocol must have the same major version. Overrides:
 
 | Env var | Purpose |
@@ -127,55 +104,15 @@ uses signals and `waitpid`. On Windows, build it through the container.
 
 ### CI
 
-The GitHub workflows follow `openkaiden/openshell-image-claude` and use the
-shared `openkaiden/gh-actions` OCI image workflow (buildah, linux/amd64 and
-linux/arm64):
-
 | Workflow | Trigger | Does |
 |---|---|---|
-| `pr-check.yaml` | pull requests | `cargo fmt --check`, `cargo clippy -D warnings`, image build and tests (no push) |
-| `next-build.yaml` | push to `main`, manual | image build and tests, push `ghcr.io/openkaiden/openshell-image-gateway:next` (+ commit SHA tag) with build provenance |
+| `pr-check.yaml` | pull requests | `cargo fmt --check`, `cargo clippy -D warnings` |
+| `next-build.yaml` | push to `main`, manual | build and tests |
 
-The shared workflow runs the image tests per platform:
-- `tests/setup.sh` runs once and starts a rootless Podman API socket.
-- `tests/test.sh` checks that:
-  - the hook binary runs;
-  - the hook starts before the gateway and the gateway's exit code is passed through;
-  - `config preflight` accepts the generated config;
-  - a running gateway (Podman driver) negotiates with the hook;
-  - a UNC bind mount is denied;
-  - `C:\Users\test\proj` is rewritten to `/mnt/c/Users/test/proj`.
-
-To run the tests locally against a built image:
-
-```sh
-bash tests/setup.sh
-IMAGE=openshell-gateway-admission PLATFORM=linux/amd64 bash tests/test.sh
-```
 
 Dependabot updates the GitHub Actions and the cargo dependencies (tonic and
-prost grouped). The `docker` entry is kept to match the other images, but the
-Containerfile `FROM` lines use build args (`OPENSHELL_VERSION`/`GATEWAY_TAG`, `RUST_IMAGE`), which
-Dependabot doesn't bump.
+prost grouped).
 
-## Run
-
-Use the image exactly like the upstream gateway image: same arguments, same
-environment variables, same mounts. For example, swap the image in OpenShell's
-`deploy/docker/docker-compose.yml`. Upstream's `command: []` trick still works,
-because the hook passes the gateway arguments through unchanged.
-
-Bind mounts are disabled in the gateway by default. To use them, the operator
-must enable them in the driver table:
-
-```toml
-[openshell.drivers.podman]          # or [openshell.drivers.docker]
-allow_driver_config = true
-enable_bind_mounts  = true
-
-[openshell.drivers.podman.resource_admission]
-enabled = false                     # bind mounts are denied while label admission is on
-```
 
 ### Settings
 
